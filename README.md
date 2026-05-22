@@ -10,18 +10,49 @@ Python GUI application for surveying a radio network with:
 
 The app includes simulator modes for both GPS and SDR so the GUI and logging flow can be tested before hardware is connected.
 
-## Quick Start
+## Ubuntu Quick Start
 
-Install Python 3.11 or newer first if `python` is not already available in PowerShell.
+Install the Ubuntu Python GUI and virtual-environment packages:
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python -m radio_survey
+```bash
+sudo apt update
+sudo apt install python3 python3-venv python3-tk
+```
+
+Create a virtual environment and start the app:
+
+```bash
+cd ~/Drive_Test
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+python3 -m radio_survey
 ```
 
 If you do not have `pyserial` or `SoapySDR` available yet, the app can still run with simulated GPS and received level data.
+
+## Ubuntu GPS Setup
+
+USB GPS receivers normally appear as one of these devices:
+
+```text
+/dev/ttyUSB0
+/dev/ttyACM0
+/dev/serial/by-id/...
+```
+
+The GUI defaults to `/dev/ttyUSB0` and has a **Refresh** button that scans those Linux serial-device paths. If your user cannot open the GPS device, add yourself to the `dialout` group and then log out and back in:
+
+```bash
+sudo usermod -aG dialout "$USER"
+```
+
+You can check which port was created after plugging in the GPS with:
+
+```bash
+dmesg | tail
+ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
+```
 
 ## CSV Format
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob
 import math
 import threading
 import time
@@ -11,6 +12,24 @@ from .nmea import GpsFix, parse_nmea
 
 FixCallback = Callable[[GpsFix], None]
 ErrorCallback = Callable[[str], None]
+
+LINUX_GPS_PORT_PATTERNS = (
+    "/dev/ttyUSB*",
+    "/dev/ttyACM*",
+    "/dev/serial/by-id/*",
+)
+
+
+def discover_gps_ports() -> list[str]:
+    ports: list[str] = []
+    for pattern in LINUX_GPS_PORT_PATTERNS:
+        ports.extend(glob.glob(pattern))
+    return sorted(dict.fromkeys(ports))
+
+
+def default_gps_port() -> str:
+    ports = discover_gps_ports()
+    return ports[0] if ports else "/dev/ttyUSB0"
 
 
 class GpsSource(Protocol):
@@ -50,7 +69,7 @@ class SerialGpsSource:
                     if fix is not None:
                         on_fix(fix)
         except Exception as exc:
-            on_error(f"GPS error: {exc}")
+            on_error(f"GPS error: {exc}. On Ubuntu, check the port path and dialout group permissions.")
 
 
 class SimulatedGpsSource:
@@ -86,4 +105,3 @@ class SimulatedGpsSource:
                 )
             )
             time.sleep(self.interval_s)
-

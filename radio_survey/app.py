@@ -8,7 +8,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .config import SDR_PARAMETER_DEFS, ParameterDef
-from .gps import SerialGpsSource, SimulatedGpsSource
+from .gps import SerialGpsSource, SimulatedGpsSource, default_gps_port, discover_gps_ports
 from .logger import CsvSurveyLogger
 from .nmea import GpsFix
 from .sdr import LevelMeter, create_level_meter
@@ -62,17 +62,19 @@ class SurveyApp(tk.Tk):
         frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
         frame.columnconfigure(1, weight=1)
 
-        self.gps_sim_var = tk.BooleanVar(value=True)
+        self.gps_sim_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(frame, text="Simulated GPS", variable=self.gps_sim_var).grid(row=0, column=0, columnspan=3, sticky="w")
 
-        self.gps_port_var = tk.StringVar(value="COM3")
+        self.gps_port_var = tk.StringVar(value=default_gps_port())
         self.gps_baud_var = tk.IntVar(value=9600)
         ttk.Label(frame, text="GPS port").grid(row=1, column=0, sticky="w")
-        ttk.Entry(frame, textvariable=self.gps_port_var, width=12).grid(row=1, column=1, sticky="ew", padx=4)
+        self.gps_port_combo = ttk.Combobox(frame, textvariable=self.gps_port_var, values=discover_gps_ports(), width=18)
+        self.gps_port_combo.grid(row=1, column=1, sticky="ew", padx=4)
+        ttk.Button(frame, text="Refresh", command=self._refresh_gps_ports).grid(row=1, column=2, sticky="e")
         ttk.Label(frame, text="Baud").grid(row=2, column=0, sticky="w")
         ttk.Entry(frame, textvariable=self.gps_baud_var, width=12).grid(row=2, column=1, sticky="ew", padx=4)
 
-        self.csv_path_var = tk.StringVar(value=str(Path.cwd() / "survey_log.csv"))
+        self.csv_path_var = tk.StringVar(value=str(Path.home() / "radio_survey_logs" / "survey_log.csv"))
         ttk.Label(frame, text="CSV file").grid(row=3, column=0, sticky="w")
         ttk.Entry(frame, textvariable=self.csv_path_var, width=32).grid(row=3, column=1, sticky="ew", padx=4)
         ttk.Button(frame, text="Browse", command=self._browse_csv).grid(row=3, column=2, sticky="e")
@@ -121,7 +123,7 @@ class SurveyApp(tk.Tk):
             )
         ):
             ttk.Label(frame, text=label).grid(row=0, column=column, sticky="w")
-            ttk.Label(frame, textvariable=var, font=("Segoe UI", 11, "bold")).grid(row=1, column=column, sticky="w")
+            ttk.Label(frame, textvariable=var, font=("TkDefaultFont", 11, "bold")).grid(row=1, column=column, sticky="w")
 
     def _build_plot_panel(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Received Level (dBm)").grid(row=1, column=0, sticky="w", pady=(10, 2))
@@ -153,6 +155,12 @@ class SurveyApp(tk.Tk):
         )
         if path:
             self.csv_path_var.set(path)
+
+    def _refresh_gps_ports(self) -> None:
+        ports = discover_gps_ports()
+        self.gps_port_combo.configure(values=ports)
+        if ports and self.gps_port_var.get() not in ports:
+            self.gps_port_var.set(ports[0])
 
     def _start(self) -> None:
         if self._running:
@@ -274,7 +282,7 @@ class SurveyApp(tk.Tk):
             canvas.create_line(margin_left, y, width - margin_right, y, fill="#202a33")
 
         if not self._points:
-            canvas.create_text(width / 2, height / 2, text="Waiting for GPS fixes", fill="#b7c0c9", font=("Segoe UI", 13))
+            canvas.create_text(width / 2, height / 2, text="Waiting for GPS fixes", fill="#b7c0c9", font=("TkDefaultFont", 13))
             return
 
         now = time.time()
@@ -310,4 +318,3 @@ class SurveyApp(tk.Tk):
 def main() -> None:
     app = SurveyApp()
     app.mainloop()
-
