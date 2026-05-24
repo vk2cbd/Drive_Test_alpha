@@ -193,7 +193,7 @@ class SurveyApp(tk.Tk):
         self.canvas.bind("<Configure>", lambda _event: self._redraw_plot())
 
     def _make_var(self, param: ParameterDef) -> tk.Variable:
-        value = self._settings.get(param.key, param.default)
+        value = self._settings.get(param.key, self._legacy_setting_value(param))
         if param.kind == "bool":
             return tk.BooleanVar(value=bool(value))
         if param.kind == "int":
@@ -419,7 +419,18 @@ class SurveyApp(tk.Tk):
             params[key] = value
         if "center_frequency_mhz" in params:
             params["center_frequency_hz"] = float(params.pop("center_frequency_mhz")) * 1_000_000.0
+        if "sample_rate_msps" in params:
+            params["sample_rate_hz"] = float(params.pop("sample_rate_msps")) * 1_000_000.0
+        if "bandwidth_mhz" in params:
+            params["bandwidth_hz"] = float(params.pop("bandwidth_mhz")) * 1_000_000.0
         return params
+
+    def _legacy_setting_value(self, param: ParameterDef) -> object:
+        if param.key == "sample_rate_msps" and "sample_rate_hz" in self._settings:
+            return float(self._settings["sample_rate_hz"]) / 1_000_000.0
+        if param.key == "bandwidth_mhz" and "bandwidth_hz" in self._settings:
+            return float(self._settings["bandwidth_hz"]) / 1_000_000.0
+        return param.default
 
     def _coerce_choice(self, value: object) -> object:
         text = str(value)
