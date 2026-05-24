@@ -36,6 +36,7 @@ class SurveyApp(tk.Tk):
         self._vars: dict[str, tk.Variable] = {}
         self._widgets: dict[str, ttk.Widget] = {}
         self._settings = load_settings()
+        self._last_valid_sdr_values: dict[str, object] = {}
         self._last_valid_y_max = self._valid_y_value(self._settings.get("plot_y_max_dbm", -40.0), -40.0)
         self._last_valid_y_min = self._valid_y_value(self._settings.get("plot_y_min_dbm", -120.0), -120.0)
         if self._last_valid_y_max <= self._last_valid_y_min:
@@ -161,6 +162,7 @@ class SurveyApp(tk.Tk):
             self._widgets[param.key] = widget
             widget.grid(row=row, column=1, sticky="ew", padx=4, pady=1)
             self._bind_commit(widget, param)
+            self._last_valid_sdr_values[param.key] = self._coerce_param_value(param, var.get())
             if param.units:
                 ttk.Label(frame, text=param.units).grid(row=row, column=2, sticky="w")
 
@@ -278,6 +280,8 @@ class SurveyApp(tk.Tk):
     def _commit_all_settings(self) -> None:
         try:
             self._format_frequency_field()
+            if not self._validate_sdr_fields():
+                return
             self._save_current_settings()
             if self._running:
                 self._restart_gps_source()
@@ -355,17 +359,7 @@ class SurveyApp(tk.Tk):
         definitions = {param.key: param for param in SDR_PARAMETER_DEFS}
         for key, var in self._vars.items():
             param = definitions[key]
-            value = var.get()
-            if param.kind == "bool":
-                params[key] = bool(value)
-            elif param.kind == "int":
-                params[key] = int(value)
-            elif param.kind == "float":
-                params[key] = float(value)
-            elif param.kind == "choice":
-                params[key] = self._coerce_choice(value)
-            else:
-                params[key] = str(value)
+            params[key] = self._coerce_param_value(param, var.get())
         return params
 
     def _restart_gps_source(self) -> None:
@@ -401,22 +395,74 @@ class SurveyApp(tk.Tk):
 
     def _format_frequency_field(self) -> None:
         if "center_frequency_mhz" in self._vars:
-            value = float(self._vars["center_frequency_mhz"].get())
+            try:
+                value = float(self._vars["center_frequency_mhz"].get())
+            except (TypeError, ValueError, tk.TclError):
+                return
             self._vars["center_frequency_mhz"].set(f"{value:.6f}")
+
+    def _validate_sdr_fields(self) -> bool:
+        for param in SDR_PARAMETER_DEFS:
+            var = self._vars[param.key]
+            try:
+                value = self._coerce_param_value(param, var.get())
+            except (TypeError, ValueError, tk.TclError):
+                self._restore_sdr_field(param)
+                self.status_var.set(f"{param.label} was not applied: invalid value")
+                return False
+            if not self._param_value_in_range(param, value):
+                self._restore_sdr_field(param)
+                self.status_var.set(
+                    f"{param.label} was not applied: valid range is {param.minimum} to {param.maximum}"
+                )
+                return False
+            self._last_valid_sdr_values[param.key] = value
+            self._set_param_display_value(param, value)
+        return True
+
+    def _restore_sdr_field(self, param: ParameterDef) -> None:
+        self._set_param_display_value(param, self._last_valid_sdr_values.get(param.key, param.default))
+
+    def _set_param_display_value(self, param: ParameterDef, value: object) -> None:
+        if param.kind == "bool":
+            self._vars[param.key].set(bool(value))
+        elif param.kind == "int":
+            self._vars[param.key].set(str(int(value)))
+        elif param.kind == "float":
+            if param.key == "center_frequency_mhz":
+                self._vars[param.key].set(f"{float(value):.6f}")
+            else:
+                self._vars[param.key].set(str(float(value)))
+        else:
+            self._vars[param.key].set(str(value))
+
+    def _param_value_in_range(self, param: ParameterDef, value: object) -> bool:
+        if param.kind not in ("int", "float"):
+            return True
+        numeric = float(value)
+        if param.minimum is not None and numeric < param.minimum:
+            return False
+        if param.maximum is not None and numeric > param.maximum:
+            return False
+        return True
+
+    def _coerce_param_value(self, param: ParameterDef, value: object) -> object:
+        if param.kind == "bool":
+            return bool(value)
+        if param.kind == "int":
+            return int(value)
+        if param.kind == "float":
+            return float(value)
+        if param.kind == "choice":
+            return self._coerce_choice(value)
+        return str(value)
 
     def _collect_sdr_params(self) -> dict[str, object]:
         params: dict[str, object] = {}
         definitions = {param.key: param for param in SDR_PARAMETER_DEFS}
         for key, var in self._vars.items():
             param = definitions[key]
-            value = var.get()
-            if param.kind == "choice":
-                value = self._coerce_choice(value)
-            elif param.kind == "int":
-                value = int(value)
-            elif param.kind == "float":
-                value = float(value)
-            params[key] = value
+            params[key] = self._coerce_param_value(param, var.get())
         if "center_frequency_mhz" in params:
             params["center_frequency_hz"] = float(params.pop("center_frequency_mhz")) * 1_000_000.0
         if "sample_rate_msps" in params:

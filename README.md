@@ -43,6 +43,8 @@ Text and numeric fields are committed when you press Enter in the field. When th
 
 Sample rate is entered in Msps, and IF bandwidth is entered in MHz. The app converts those values to Hz before configuring the SDR backend.
 
+SDR numeric fields with configured ranges reject invalid or out-of-range values and keep the last valid setting. Current guarded ranges include RF gain reduction 0 to 66 dB, IF gain reduction 0 to 66 dB, and LNA state 0 to 9.
+
 CSV logging is controlled by the **Log to CSV** button. It always defaults to off when the app starts and is not remembered between sessions.
 
 The received-level plot defaults to a manual Y axis. **Y max** and **Y min** are remembered between runs, can be typed directly, and have +/- buttons that adjust the value by 5 dB per press. Manual Y-axis values must be between -120 dBm and -10 dBm; values outside that range are ignored. **Autoscale Y** always defaults to off when the app starts.
