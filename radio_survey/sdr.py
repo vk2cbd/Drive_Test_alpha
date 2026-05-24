@@ -3,12 +3,20 @@ from __future__ import annotations
 import math
 import random
 import time
+from dataclasses import dataclass
 from typing import Protocol
+
+
+@dataclass(frozen=True)
+class SpectrumSnapshot:
+    frequencies_mhz: tuple[float, ...]
+    powers_dbm: tuple[float, ...]
 
 
 class LevelMeter(Protocol):
     def configure(self, params: dict[str, object]) -> None: ...
     def read_level_dbm(self) -> float: ...
+    def get_last_spectrum(self) -> SpectrumSnapshot | None: ...
     def close(self) -> None: ...
 
 
@@ -16,19 +24,46 @@ class SimulatedLevelMeter:
     def __init__(self) -> None:
         self._start = time.monotonic()
         self._offset = -82.0
+        self._center_frequency_hz = 100_000_000.0
+        self._bandwidth_hz = 1_536_000.0
+        self._last_spectrum: SpectrumSnapshot | None = None
 
     def configure(self, params: dict[str, object]) -> None:
         self._offset = float(params.get("simulated_level_dbm", -82.0))
+        self._center_frequency_hz = float(params.get("center_frequency_hz", self._center_frequency_hz))
+        self._bandwidth_hz = float(params.get("bandwidth_hz", self._bandwidth_hz))
 
     def read_level_dbm(self) -> float:
         elapsed = time.monotonic() - self._start
         slow_fade = math.sin(elapsed / 14.0) * 5.0
         flutter = math.sin(elapsed * 2.7) * 1.5
         noise = random.gauss(0.0, 0.8)
-        return self._offset + slow_fade + flutter + noise
+        level = self._offset + slow_fade + flutter + noise
+        self._last_spectrum = self._make_simulated_spectrum(level, elapsed)
+        return level
+
+    def get_last_spectrum(self) -> SpectrumSnapshot | None:
+        return self._last_spectrum
 
     def close(self) -> None:
         return
+
+    def _make_simulated_spectrum(self, level_dbm: float, elapsed: float) -> SpectrumSnapshot:
+        bins = 161
+        start_hz = self._center_frequency_hz - self._bandwidth_hz / 2.0
+        step_hz = self._bandwidth_hz / (bins - 1)
+        carrier_offset = math.sin(elapsed / 12.0) * 0.18
+        frequencies: list[float] = []
+        powers: list[float] = []
+        for index in range(bins):
+            fraction = (index / (bins - 1)) * 2.0 - 1.0
+            frequency_hz = start_hz + step_hz * index
+            noise_floor = level_dbm - 38.0 + random.gauss(0.0, 1.8)
+            signal = 28.0 * math.exp(-((fraction - carrier_offset) / 0.08) ** 2)
+            shoulder = 9.0 * math.exp(-((fraction + 0.35) / 0.18) ** 2)
+            frequencies.append(frequency_hz / 1_000_000.0)
+            powers.append(noise_floor + signal + shoulder)
+        return SpectrumSnapshot(tuple(frequencies), tuple(powers))
 
 
 class SoapySdrplayLevelMeter:
@@ -39,6 +74,10 @@ class SoapySdrplayLevelMeter:
         self._samples_per_level = 8192
         self._dbm_offset = -30.0
         self._last_level_dbm: float | None = None
+        self._last_spectrum: SpectrumSnapshot | None = None
+        self._center_frequency_hz = 100_000_000.0
+        self._sample_rate_hz = 2_000_000.0
+        self._bandwidth_hz = 1_536_000.0
 
     def configure(self, params: dict[str, object]) -> None:
         try:
@@ -59,6 +98,9 @@ class SoapySdrplayLevelMeter:
         }
         self._samples_per_level = int(params.get("samples_per_level", 8192))
         self._dbm_offset = float(params.get("dbm_offset", -30.0))
+        self._center_frequency_hz = float(params["center_frequency_hz"])
+        self._sample_rate_hz = float(params["sample_rate_hz"])
+        self._bandwidth_hz = float(params["bandwidth_hz"])
 
         device_args = _parse_device_args(str(params.get("device_args", "driver=sdrplay")))
         try:
@@ -71,9 +113,9 @@ class SoapySdrplayLevelMeter:
                 "or switch the SDR backend to simulator until the SDRplay API and "
                 "SoapySDR SDRplay module are installed."
             ) from exc
-        self._sdr.setSampleRate(self._direction, self._channel, float(params["sample_rate_hz"]))
-        self._sdr.setFrequency(self._direction, self._channel, float(params["center_frequency_hz"]))
-        self._set_if_supported("setBandwidth", float(params["bandwidth_hz"]))
+        self._sdr.setSampleRate(self._direction, self._channel, self._sample_rate_hz)
+        self._sdr.setFrequency(self._direction, self._channel, self._center_frequency_hz)
+        self._set_if_supported("setBandwidth", self._bandwidth_hz)
         self._set_if_supported("setAntenna", str(params.get("antenna", "A")))
         self._set_gain(params)
         self._write_settings(params)
@@ -95,6 +137,7 @@ class SoapySdrplayLevelMeter:
                     rms = self._np.sqrt(self._np.mean(self._np.abs(samples) ** 2))
                     dbfs = 20.0 * math.log10(max(float(rms), 1e-12))
                     self._last_level_dbm = dbfs + self._dbm_offset
+                    self._last_spectrum = self._make_spectrum(samples)
                     return self._last_level_dbm
                 last_error_code = int(result.ret)
                 if last_error_code not in self._transient_read_codes:
@@ -108,6 +151,9 @@ class SoapySdrplayLevelMeter:
             "SDR did not return samples before timeout. Try a lower sample rate, "
             "larger samples-per-level value, or confirm the SDRplay API service is stable."
         )
+
+    def get_last_spectrum(self) -> SpectrumSnapshot | None:
+        return self._last_spectrum
 
     def close(self) -> None:
         if self._sdr is not None and self._stream is not None:
@@ -128,6 +174,27 @@ class SoapySdrplayLevelMeter:
         if self._stream_active:
             self._sdr.deactivateStream(self._stream)
             self._stream_active = False
+
+    def _make_spectrum(self, samples: object) -> SpectrumSnapshot:
+        fft_size = min(len(samples), 4096)
+        if fft_size < 16:
+            return SpectrumSnapshot((), ())
+
+        samples = samples[-fft_size:]
+        window = self._np.hanning(fft_size).astype(self._np.float32)
+        spectrum = self._np.fft.fftshift(self._np.fft.fft(samples * window))
+        offsets_hz = self._np.fft.fftshift(self._np.fft.fftfreq(fft_size, d=1.0 / self._sample_rate_hz))
+        powers_dbm = 20.0 * self._np.log10(self._np.maximum(self._np.abs(spectrum) / fft_size, 1e-12)) + self._dbm_offset
+
+        half_bw = self._bandwidth_hz / 2.0
+        mask = self._np.abs(offsets_hz) <= half_bw
+        if mask.any():
+            offsets_hz = offsets_hz[mask]
+            powers_dbm = powers_dbm[mask]
+
+        frequencies_mhz = (self._center_frequency_hz + offsets_hz) / 1_000_000.0
+        frequencies_mhz, powers_dbm = _thin_spectrum(frequencies_mhz, powers_dbm, 512)
+        return SpectrumSnapshot(tuple(float(value) for value in frequencies_mhz), tuple(float(value) for value in powers_dbm))
 
     def _set_if_supported(self, method_name: str, value: object) -> None:
         method = getattr(self._sdr, method_name, None)
@@ -182,3 +249,11 @@ def _parse_device_args(value: str) -> dict[str, str]:
 
 def _format_device_args(args: dict[str, str]) -> str:
     return ",".join(f"{key}={value}" for key, value in args.items())
+
+
+def _thin_spectrum(frequencies: object, powers: object, max_points: int) -> tuple[object, object]:
+    length = len(frequencies)
+    if length <= max_points:
+        return frequencies, powers
+    step = max(1, length // max_points)
+    return frequencies[::step], powers[::step]

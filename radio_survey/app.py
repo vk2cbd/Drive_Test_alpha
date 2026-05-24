@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from . import __version__
 from .config import SDR_PARAMETER_DEFS, ParameterDef
 from .gps import SerialGpsSource, SimulatedGpsSource, default_gps_port, discover_gps_ports
 from .logger import CsvSurveyLogger
@@ -42,6 +43,11 @@ class SurveyApp(tk.Tk):
         if self._last_valid_y_max <= self._last_valid_y_min:
             self._last_valid_y_min = -120.0
             self._last_valid_y_max = -40.0
+        self._last_valid_spectrum_y_max = self._valid_y_value(self._settings.get("spectrum_y_max_dbm", -20.0), -20.0)
+        self._last_valid_spectrum_y_min = self._valid_y_value(self._settings.get("spectrum_y_min_dbm", -120.0), -120.0)
+        if self._last_valid_spectrum_y_max <= self._last_valid_spectrum_y_min:
+            self._last_valid_spectrum_y_min = -120.0
+            self._last_valid_spectrum_y_max = -20.0
         self._running = False
 
         self._build_ui()
@@ -76,12 +82,15 @@ class SurveyApp(tk.Tk):
         plot_area = ttk.Frame(self, padding=(0, 10, 10, 10))
         plot_area.grid(row=0, column=1, sticky="nsew")
         plot_area.columnconfigure(0, weight=1)
+        plot_area.columnconfigure(1, weight=1)
         plot_area.rowconfigure(2, weight=1)
 
         self._build_io_panel(setup)
         self._build_sdr_panel(setup)
         self._build_status_panel(plot_area)
         self._build_plot_panel(plot_area)
+
+        self.title(f"Radio Network Survey Logger {__version__}")
 
     def _build_io_panel(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="Survey IO", padding=8)
@@ -149,6 +158,29 @@ class SurveyApp(tk.Tk):
         ttk.Button(y_min_buttons, text="-", width=2, command=lambda: self._step_y_axis(self.y_min_var, -5.0)).grid(row=0, column=0)
         ttk.Button(y_min_buttons, text="+", width=2, command=lambda: self._step_y_axis(self.y_min_var, 5.0)).grid(row=0, column=1)
 
+        self.autoscale_spectrum_y_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Autoscale Spectrum Y", variable=self.autoscale_spectrum_y_var, command=self._redraw_spectrum).grid(row=10, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+        self.spectrum_y_max_var = tk.StringVar(value=f"{self._last_valid_spectrum_y_max:.0f}")
+        self.spectrum_y_min_var = tk.StringVar(value=f"{self._last_valid_spectrum_y_min:.0f}")
+        ttk.Label(frame, text="Spec Y max").grid(row=11, column=0, sticky="w")
+        spectrum_y_max_entry = ttk.Entry(frame, textvariable=self.spectrum_y_max_var, width=8)
+        spectrum_y_max_entry.grid(row=11, column=1, sticky="ew", padx=4)
+        spectrum_y_max_entry.bind("<Return>", lambda _event: self._commit_spectrum_y_axis())
+        spectrum_y_max_buttons = ttk.Frame(frame)
+        spectrum_y_max_buttons.grid(row=11, column=2, sticky="e")
+        ttk.Button(spectrum_y_max_buttons, text="-", width=2, command=lambda: self._step_spectrum_y_axis(self.spectrum_y_max_var, -5.0)).grid(row=0, column=0)
+        ttk.Button(spectrum_y_max_buttons, text="+", width=2, command=lambda: self._step_spectrum_y_axis(self.spectrum_y_max_var, 5.0)).grid(row=0, column=1)
+
+        ttk.Label(frame, text="Spec Y min").grid(row=12, column=0, sticky="w")
+        spectrum_y_min_entry = ttk.Entry(frame, textvariable=self.spectrum_y_min_var, width=8)
+        spectrum_y_min_entry.grid(row=12, column=1, sticky="ew", padx=4)
+        spectrum_y_min_entry.bind("<Return>", lambda _event: self._commit_spectrum_y_axis())
+        spectrum_y_min_buttons = ttk.Frame(frame)
+        spectrum_y_min_buttons.grid(row=12, column=2, sticky="e")
+        ttk.Button(spectrum_y_min_buttons, text="-", width=2, command=lambda: self._step_spectrum_y_axis(self.spectrum_y_min_var, -5.0)).grid(row=0, column=0)
+        ttk.Button(spectrum_y_min_buttons, text="+", width=2, command=lambda: self._step_spectrum_y_axis(self.spectrum_y_min_var, 5.0)).grid(row=0, column=1)
+
     def _build_sdr_panel(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="SDR Parameters", padding=8)
         frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
@@ -168,7 +200,7 @@ class SurveyApp(tk.Tk):
 
     def _build_status_panel(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="Realtime Data", padding=10)
-        frame.grid(row=0, column=0, sticky="ew")
+        frame.grid(row=0, column=0, columnspan=2, sticky="ew")
         for index in range(4):
             frame.columnconfigure(index, weight=1)
 
@@ -189,9 +221,13 @@ class SurveyApp(tk.Tk):
             ttk.Label(frame, textvariable=var, font=("TkDefaultFont", 11, "bold")).grid(row=1, column=column, sticky="w")
 
     def _build_plot_panel(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="Received Level (dBm)").grid(row=1, column=0, sticky="w", pady=(10, 2))
+        ttk.Label(parent, text="Spectrum (dBm)").grid(row=1, column=0, sticky="w", pady=(10, 2))
+        ttk.Label(parent, text="Received Level (dBm)").grid(row=1, column=1, sticky="w", pady=(10, 2), padx=(10, 0))
+        self.spectrum_canvas = tk.Canvas(parent, background="#101418", highlightthickness=0)
+        self.spectrum_canvas.grid(row=2, column=0, sticky="nsew")
+        self.spectrum_canvas.bind("<Configure>", lambda _event: self._redraw_spectrum())
         self.canvas = tk.Canvas(parent, background="#101418", highlightthickness=0)
-        self.canvas.grid(row=2, column=0, sticky="nsew")
+        self.canvas.grid(row=2, column=1, sticky="nsew", padx=(10, 0))
         self.canvas.bind("<Configure>", lambda _event: self._redraw_plot())
 
     def _make_var(self, param: ParameterDef) -> tk.Variable:
@@ -306,12 +342,29 @@ class SurveyApp(tk.Tk):
         if redraw:
             self._redraw_plot()
 
+    def _commit_spectrum_y_axis(self, redraw: bool = True) -> None:
+        if not self._apply_spectrum_y_axis_fields():
+            self.status_var.set("Spectrum Y axis values must be between -120 and -10 dBm")
+            return
+        self._settings["spectrum_y_max_dbm"] = self._last_valid_spectrum_y_max
+        self._settings["spectrum_y_min_dbm"] = self._last_valid_spectrum_y_min
+        save_settings(self._settings)
+        if redraw:
+            self._redraw_spectrum()
+
     def _step_y_axis(self, var: tk.StringVar, delta_db: float) -> None:
         current = self._parse_y_value(var.get())
         if current is None:
             current = self._last_valid_y_max if var is self.y_max_var else self._last_valid_y_min
         var.set(f"{self._clamp_y_value(current + delta_db):.0f}")
         self._commit_y_axis()
+
+    def _step_spectrum_y_axis(self, var: tk.StringVar, delta_db: float) -> None:
+        current = self._parse_y_value(var.get())
+        if current is None:
+            current = self._last_valid_spectrum_y_max if var is self.spectrum_y_max_var else self._last_valid_spectrum_y_min
+        var.set(f"{self._clamp_y_value(current + delta_db):.0f}")
+        self._commit_spectrum_y_axis()
 
     def _apply_y_axis_fields(self) -> bool:
         y_max = self._parse_y_value(self.y_max_var.get())
@@ -322,6 +375,17 @@ class SurveyApp(tk.Tk):
         self._last_valid_y_min = y_min
         self.y_max_var.set(f"{y_max:.0f}")
         self.y_min_var.set(f"{y_min:.0f}")
+        return True
+
+    def _apply_spectrum_y_axis_fields(self) -> bool:
+        y_max = self._parse_y_value(self.spectrum_y_max_var.get())
+        y_min = self._parse_y_value(self.spectrum_y_min_var.get())
+        if y_max is None or y_min is None or y_max <= y_min:
+            return False
+        self._last_valid_spectrum_y_max = y_max
+        self._last_valid_spectrum_y_min = y_min
+        self.spectrum_y_max_var.set(f"{y_max:.0f}")
+        self.spectrum_y_min_var.set(f"{y_min:.0f}")
         return True
 
     def _parse_y_value(self, value: object) -> float | None:
@@ -349,6 +413,8 @@ class SurveyApp(tk.Tk):
             "plot_window_minutes": int(self.window_minutes_var.get()),
             "plot_y_max_dbm": self._last_valid_y_max,
             "plot_y_min_dbm": self._last_valid_y_min,
+            "spectrum_y_max_dbm": self._last_valid_spectrum_y_max,
+            "spectrum_y_min_dbm": self._last_valid_spectrum_y_min,
         }
         settings.update(self._collect_sdr_display_params())
         self._settings = settings
@@ -521,6 +587,7 @@ class SurveyApp(tk.Tk):
         self.timestamp_var.set(fix.timestamp_utc.strftime("%H:%M:%S UTC"))
         self.level_var.set(f"{level:.2f} dBm")
         self._points.append(LevelPoint(time.time(), level))
+        self._redraw_spectrum()
         self._redraw_plot()
 
     def _redraw_plot(self) -> None:
@@ -580,6 +647,66 @@ class SurveyApp(tk.Tk):
         canvas.create_oval(x - 4, y - 4, x + 4, y + 4, fill="#ffffff", outline="#5cc8ff")
         canvas.create_text(margin_left, height - 16, text=f"-{self.window_minutes_var.get()} min", fill="#b7c0c9", anchor="w")
         canvas.create_text(width - margin_right, height - 16, text="now", fill="#b7c0c9", anchor="e")
+
+    def _redraw_spectrum(self) -> None:
+        canvas = self.spectrum_canvas
+        width = max(canvas.winfo_width(), 10)
+        height = max(canvas.winfo_height(), 10)
+        canvas.delete("all")
+
+        margin_left = 58
+        margin_right = 18
+        margin_top = 16
+        margin_bottom = 38
+        plot_w = width - margin_left - margin_right
+        plot_h = height - margin_top - margin_bottom
+
+        canvas.create_rectangle(0, 0, width, height, fill="#101418", outline="")
+        canvas.create_rectangle(margin_left, margin_top, width - margin_right, height - margin_bottom, outline="#d7e0ea")
+
+        spectrum = self._level_meter.get_last_spectrum() if self._level_meter is not None else None
+        if spectrum is None or not spectrum.frequencies_mhz or not spectrum.powers_dbm:
+            canvas.create_text(width / 2, height / 2, text="Waiting for spectrum", fill="#d7e0ea", font=("TkDefaultFont", 13))
+            return
+
+        frequencies = spectrum.frequencies_mhz
+        powers = spectrum.powers_dbm
+        x_min = min(frequencies)
+        x_max = max(frequencies)
+        if x_max <= x_min:
+            return
+
+        if self.autoscale_spectrum_y_var.get():
+            min_power = min(powers)
+            max_power = max(powers)
+            span = max(max_power - min_power, 10.0)
+            low = min_power - (span * 0.1)
+            high = max_power + (span * 0.1)
+        else:
+            self._apply_spectrum_y_axis_fields()
+            low = self._last_valid_spectrum_y_min
+            high = self._last_valid_spectrum_y_max
+
+        for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
+            y = margin_top + plot_h * fraction
+            x = margin_left + plot_w * fraction
+            canvas.create_line(margin_left, y, width - margin_right, y, fill="#8fa2b3")
+            canvas.create_line(x, margin_top, x, height - margin_bottom, fill="#8fa2b3")
+            power_label = high - (high - low) * fraction
+            freq_label = x_min + (x_max - x_min) * fraction
+            canvas.create_text(margin_left - 8, y, text=f"{power_label:.0f}", fill="#d7e0ea", anchor="e", font=("TkDefaultFont", 9))
+            canvas.create_text(x, height - 18, text=f"{freq_label:.3f}", fill="#d7e0ea", anchor="n", font=("TkDefaultFont", 9))
+
+        coords: list[float] = []
+        for frequency, power in zip(frequencies, powers):
+            x = margin_left + (frequency - x_min) / (x_max - x_min) * plot_w
+            clipped_power = max(low, min(high, power))
+            y = margin_top + (high - clipped_power) / (high - low) * plot_h
+            coords.extend((x, y))
+
+        if len(coords) >= 4:
+            canvas.create_line(*coords, fill="#f7d35c", width=1)
+        canvas.create_text(width - margin_right, height - 4, text="MHz", fill="#d7e0ea", anchor="se", font=("TkDefaultFont", 9))
 
     def _on_close(self) -> None:
         self._cleanup()

@@ -1,5 +1,7 @@
 # Radio Network Survey Logger
 
+Version: `0.2.0-alpha`
+
 Python GUI application for surveying a radio network with:
 
 - USB GPS receiver emitting NMEA sentences
@@ -7,6 +9,7 @@ Python GUI application for surveying a radio network with:
 - Real-time geographic position display
 - Received-level logging to CSV
 - Scrolling received-level plot with a configurable 1 to 60 minute time window
+- Live spectrum display using the configured center frequency and IF bandwidth
 
 The app includes simulator modes for both GPS and SDR so the GUI and logging flow can be tested before hardware is connected.
 
@@ -48,6 +51,8 @@ SDR numeric fields with configured ranges reject invalid or out-of-range values 
 CSV logging is controlled by the **Log to CSV** button. It always defaults to off when the app starts and is not remembered between sessions.
 
 The received-level plot defaults to a manual Y axis. **Y max** and **Y min** are remembered between runs, can be typed directly, and have +/- buttons that adjust the value by 5 dB per press. Manual Y-axis values must be between -120 dBm and -10 dBm; values outside that range are ignored. **Autoscale Y** always defaults to off when the app starts.
+
+The spectrum display sits to the left of the received-level plot. Its frequency axis follows the configured center frequency and IF bandwidth. Spectrum Y-axis controls mirror the power plot controls and also default to manual scaling.
 
 Changing the plot time window only changes which samples are visible. It does not delete the in-memory display history for the current app session.
 
@@ -136,6 +141,6 @@ SDRconnect introduced a WebSocket/module system after v1.0.5. A future backend c
 - `radio_survey/config.py` - SDR parameter definitions used to build the GUI
 - `radio_survey/gps.py` - serial and simulated GPS sources
 - `radio_survey/nmea.py` - NMEA parsing and coordinate formatting
-- `radio_survey/sdr.py` - simulated and SoapySDR received-level backends
+- `radio_survey/sdr.py` - simulated and SoapySDR received-level/spectrum backends
 - `radio_survey/logger.py` - CSV writer
 - `tests/` - focused tests for parsing and logging
