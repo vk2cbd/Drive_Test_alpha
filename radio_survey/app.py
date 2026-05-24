@@ -521,12 +521,7 @@ class SurveyApp(tk.Tk):
         self.timestamp_var.set(fix.timestamp_utc.strftime("%H:%M:%S UTC"))
         self.level_var.set(f"{level:.2f} dBm")
         self._points.append(LevelPoint(time.time(), level))
-        self._trim_points()
         self._redraw_plot()
-
-    def _trim_points(self) -> None:
-        cutoff = time.time() - int(self.window_minutes_var.get()) * 60
-        self._points = [point for point in self._points if point.epoch_s >= cutoff]
 
     def _redraw_plot(self) -> None:
         canvas = self.canvas

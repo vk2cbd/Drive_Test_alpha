@@ -49,6 +49,8 @@ CSV logging is controlled by the **Log to CSV** button. It always defaults to of
 
 The received-level plot defaults to a manual Y axis. **Y max** and **Y min** are remembered between runs, can be typed directly, and have +/- buttons that adjust the value by 5 dB per press. Manual Y-axis values must be between -120 dBm and -10 dBm; values outside that range are ignored. **Autoscale Y** always defaults to off when the app starts.
 
+Changing the plot time window only changes which samples are visible. It does not delete the in-memory display history for the current app session.
+
 ## Ubuntu GPS Setup
 
 USB GPS receivers normally appear as one of these devices:
