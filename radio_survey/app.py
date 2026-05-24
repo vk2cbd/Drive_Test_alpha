@@ -104,6 +104,29 @@ class SurveyApp(tk.Tk):
         self.logging_enabled_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(frame, text="Log to CSV", variable=self.logging_enabled_var, command=self._toggle_logging).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
+        self.autoscale_y_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Autoscale Y", variable=self.autoscale_y_var, command=self._redraw_plot).grid(row=7, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+        self.y_max_var = tk.DoubleVar(value=float(self._settings.get("plot_y_max_dbm", -40.0)))
+        self.y_min_var = tk.DoubleVar(value=float(self._settings.get("plot_y_min_dbm", -120.0)))
+        ttk.Label(frame, text="Y max").grid(row=8, column=0, sticky="w")
+        y_max_entry = ttk.Entry(frame, textvariable=self.y_max_var, width=8)
+        y_max_entry.grid(row=8, column=1, sticky="ew", padx=4)
+        y_max_entry.bind("<Return>", lambda _event: self._commit_y_axis())
+        y_max_buttons = ttk.Frame(frame)
+        y_max_buttons.grid(row=8, column=2, sticky="e")
+        ttk.Button(y_max_buttons, text="-", width=2, command=lambda: self._step_y_axis(self.y_max_var, -5.0)).grid(row=0, column=0)
+        ttk.Button(y_max_buttons, text="+", width=2, command=lambda: self._step_y_axis(self.y_max_var, 5.0)).grid(row=0, column=1)
+
+        ttk.Label(frame, text="Y min").grid(row=9, column=0, sticky="w")
+        y_min_entry = ttk.Entry(frame, textvariable=self.y_min_var, width=8)
+        y_min_entry.grid(row=9, column=1, sticky="ew", padx=4)
+        y_min_entry.bind("<Return>", lambda _event: self._commit_y_axis())
+        y_min_buttons = ttk.Frame(frame)
+        y_min_buttons.grid(row=9, column=2, sticky="e")
+        ttk.Button(y_min_buttons, text="-", width=2, command=lambda: self._step_y_axis(self.y_min_var, -5.0)).grid(row=0, column=0)
+        ttk.Button(y_min_buttons, text="+", width=2, command=lambda: self._step_y_axis(self.y_min_var, 5.0)).grid(row=0, column=1)
+
     def _build_sdr_panel(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="SDR Parameters", padding=8)
         frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
@@ -248,6 +271,24 @@ class SurveyApp(tk.Tk):
         self._settings["plot_window_minutes"] = int(self.window_minutes_var.get())
         save_settings(self._settings)
 
+    def _commit_y_axis(self) -> None:
+        self._normalize_y_axis()
+        self._settings["plot_y_max_dbm"] = float(self.y_max_var.get())
+        self._settings["plot_y_min_dbm"] = float(self.y_min_var.get())
+        save_settings(self._settings)
+        self._redraw_plot()
+
+    def _step_y_axis(self, var: tk.DoubleVar, delta_db: float) -> None:
+        var.set(float(var.get()) + delta_db)
+        self._commit_y_axis()
+
+    def _normalize_y_axis(self) -> None:
+        y_min = float(self.y_min_var.get())
+        y_max = float(self.y_max_var.get())
+        if y_max <= y_min:
+            y_max = y_min + 5.0
+            self.y_max_var.set(y_max)
+
     def _save_current_settings(self) -> None:
         settings = {
             "gps_simulated": self.gps_sim_var.get(),
@@ -255,6 +296,8 @@ class SurveyApp(tk.Tk):
             "gps_baud": int(self.gps_baud_var.get()),
             "csv_path": self.csv_path_var.get(),
             "plot_window_minutes": int(self.window_minutes_var.get()),
+            "plot_y_max_dbm": float(self.y_max_var.get()),
+            "plot_y_min_dbm": float(self.y_min_var.get()),
         }
         settings.update(self._collect_sdr_display_params())
         self._settings = settings
@@ -411,11 +454,16 @@ class SurveyApp(tk.Tk):
         if not visible:
             return
 
-        min_level = min(point.level_dbm for point in visible)
-        max_level = max(point.level_dbm for point in visible)
-        span = max(max_level - min_level, 10.0)
-        low = min_level - (span * 0.1)
-        high = max_level + (span * 0.1)
+        if self.autoscale_y_var.get():
+            min_level = min(point.level_dbm for point in visible)
+            max_level = max(point.level_dbm for point in visible)
+            span = max(max_level - min_level, 10.0)
+            low = min_level - (span * 0.1)
+            high = max_level + (span * 0.1)
+        else:
+            self._normalize_y_axis()
+            low = float(self.y_min_var.get())
+            high = float(self.y_max_var.get())
 
         for label_value in (low, (low + high) / 2, high):
             y = margin_top + (high - label_value) / (high - low) * plot_h
