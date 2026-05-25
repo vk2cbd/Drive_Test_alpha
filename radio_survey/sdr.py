@@ -106,13 +106,13 @@ class SoapySdrplayLevelMeter:
         self._sample_rate_hz = float(params["sample_rate_hz"])
         self._bandwidth_hz = float(params["bandwidth_hz"])
 
-        device_args = _parse_device_args(str(params.get("device_args", "driver=sdrplay")))
+        device_args = _normalize_device_args(str(params.get("device_args", "driver=sdrplay")))
         try:
             self._sdr = SoapySDR.Device(device_args)
         except Exception as exc:
             raise RuntimeError(
                 "SoapySDR could not find an SDRplay device matching "
-                f"{_format_device_args(device_args)}. On Ubuntu, run "
+                f"{device_args}. On Ubuntu, run "
                 "`SoapySDRUtil --find` and use the reported driver/device args, "
                 "or switch the SDR backend to simulator until the SDRplay API and "
                 "SoapySDR SDRplay module are installed."
@@ -279,6 +279,11 @@ def create_level_meter(backend: str) -> LevelMeter:
     if backend == "soapy_sdrplay":
         return SoapySdrplayLevelMeter()
     return SimulatedLevelMeter()
+
+
+def _normalize_device_args(value: str) -> str:
+    args = _parse_device_args(value)
+    return _format_device_args(args)
 
 
 def _parse_device_args(value: str) -> dict[str, str]:
