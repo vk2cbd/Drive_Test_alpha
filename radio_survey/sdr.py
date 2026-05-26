@@ -382,11 +382,10 @@ class SoapySdrplayLevelMeter:
             applied_key = self._write_first_setting(setting_keys, params[param_key], warnings)
             if applied_key:
                 applied.append(f"{param_key} via {applied_key}")
-        if "rf_notch" in params or "fm_notch" in params:
-            rf_or_fm_notch = bool(params.get("rf_notch", False)) or bool(params.get("fm_notch", False))
-            applied_key = self._write_first_setting(("rfnotch_ctrl", "rfNotch", "rf_notch"), rf_or_fm_notch, warnings)
+        if "fm_notch" in params:
+            applied_key = self._write_first_setting(("rfnotch_ctrl", "rfNotch", "rf_notch"), params["fm_notch"], warnings)
             if applied_key:
-                applied.append(f"rf/fm_notch via {applied_key}")
+                applied.append(f"fm_notch via {applied_key}")
         if "ppm_correction" in params:
             ppm = float(params["ppm_correction"])
             method = getattr(self._sdr, "setFrequencyCorrection", None)

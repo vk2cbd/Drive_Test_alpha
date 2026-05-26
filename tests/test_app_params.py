@@ -1,4 +1,5 @@
 from radio_survey.app import SurveyApp
+from radio_survey.config import SDR_PARAMETER_DEFS
 
 
 class DummyVar:
@@ -32,3 +33,10 @@ def test_spectrum_y_axis_accepts_minus_140() -> None:
     assert app._parse_spectrum_y_value("-140") == -140.0
     assert app._parse_spectrum_y_value("-141") is None
     assert app._clamp_spectrum_y_value(-200.0) == -140.0
+
+
+def test_rf_fm_notch_duplicate_control_removed() -> None:
+    keys = {param.key for param in SDR_PARAMETER_DEFS}
+
+    assert "rf_notch" not in keys
+    assert "fm_notch" in keys
